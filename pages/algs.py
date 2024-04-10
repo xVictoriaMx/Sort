@@ -1,41 +1,10 @@
 import dash
-from dash import dcc, html
-from dash.dependencies import Input, Output
+from dash import dcc, html, callback, Input, Output
 import plotly.graph_objs as go
 import time
 import random
 import dash_bootstrap_components as dbc
-
-cards = dbc.Row([
-    dbc.Col(
-        dbc.Card([
-            html.H4("Guess the Sorting Algorithm"),
-        ],
-        body=True,
-        style={'textAlign':'center', 'color':'white'},
-        color='lightblue')),
-    dbc.Col(
-        dbc.Card([
-            html.H4("Compare Algorithms"),
-        ],
-        body=True,
-        style={'textAlign':'center', 'color':'white'},
-        color='blue')),
-    dbc.Col(
-        dbc.Card([
-            html.H4("Reset"),
-        ],
-        body=True,
-        style={'textAlign':'center', 'color':'white'},
-        color='darkblue')
-    ),
-])
-
-navbar=dbc.NavbarSimple(
-    brand='Sorting Algorithm Visualization',
-    color='primary',
-    fluid=True
-)
+import copy
 
 # Sorting algorithms
 def selection_sort(arr):
@@ -56,7 +25,7 @@ def insertion_sort(arr):
             arr[j + 1] = arr[j]
             j -= 1
         arr[j + 1] = key
-    return arr
+        yield arr
 
 def bubble_sort(arr):
     n = len(arr)
@@ -64,7 +33,7 @@ def bubble_sort(arr):
         for j in range(0, n - i - 1):
             if arr[j] > arr[j + 1]:
                 arr[j], arr[j + 1] = arr[j + 1], arr[j]
-    return arr
+        yield arr
 
 def merge_sort(arr):
     if len(arr) > 1:
@@ -95,20 +64,28 @@ def merge_sort(arr):
             arr[k] = R[j]
             j += 1
             k += 1
-    return arr
+        yield arr
 
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+def quick_sort(arr):
+    if len(arr) <= 1:
+        return arr
+    pivot = arr[len(arr) // 2]
+    left = [x for x in arr if x < pivot]
+    middle = [x for x in arr if x == pivot]
+    right = [x for x in arr if x > pivot]
+    return quick_sort(left) + middle + quick_sort(right)
+
+dash.register_page(__name__, path='/', name="Sorting Algorithms", external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 data = random.sample(range(1, 101), 20)
 figs = [go.Figure() for _ in range(5)]
 complexity_figs = [go.Figure() for _ in range(5)]
 
-sort_generators = [selection_sort(data.copy()) for _ in range(5)]
+SortAlgs = [selection_sort, insertion_sort, bubble_sort, merge_sort, quick_sort]
+sort_generators = [iter(sort_alg(data.copy()) )for sort_alg in SortAlgs]
 
-app.layout = html.Div([
-    navbar,
-    html.Br(),
-    cards,
+layout = html.Div([
+    html.H1("Sorting Algorithms", className="text-center"),
     dbc.Row([
         dbc.Col([
             dcc.Graph(id=f'sorting-graph-{i}', figure=figs[i]) for i in range(0, 5, 2)
@@ -119,10 +96,10 @@ app.layout = html.Div([
     ]),
     dbc.Row([
         dbc.Col([
-            dcc.Graph(id=f'sorting-graph-{i}', figure=figs[i]) for i in range(1, 5, 2)
+            dcc.Graph(id=f'sorting-graph-{i+1}', figure=figs[i+1]) for i in range(0, 4, 2)
         ]),
         dbc.Col([
-            dcc.Graph(id=f'complexity-graph-{i}', figure=complexity_figs[i]) for i in range(1, 5, 2)
+            dcc.Graph(id=f'complexity-graph-{i+1}', figure=complexity_figs[i+1]) for i in range(0, 4, 2)
         ])
 ]),
     dcc.Interval(
@@ -132,7 +109,7 @@ app.layout = html.Div([
     ),
 ])
 
-@app.callback(
+@callback(
     [Output(f'sorting-graph-{i}', 'figure') for i in range(5)],
     [Input('interval-component', 'n_intervals')]
 )
@@ -140,29 +117,34 @@ def update_graphs(n):
     new_data = []
     for i in range(5):
         try:
-            new_data.append(next(sort_generators[i]))
+            generated_data = next(sort_generators[i])
+            new_data.append(generated_data)
         except StopIteration:
-            new_data.append(figs[i].data[0].y)
+            new_data.append(figs[i].data[0].y if figs[i].data else [])
+        except Exception as e:
+            print(f"Error in sorting algorithm {SortAlgs[i].__name__}: {str(e)}")
+    
     updated_figs = []
     for i in range(5):
-        figs[i].data = []
-        figs[i].add_trace(go.Bar(x=list(range(len(new_data[i]))), y=new_data[i], marker_color='blue'))
-        updated_figs.append(figs[i])
+        fig = copy.deepcopy(figs[i]) 
+        fig.data = [] 
+        if isinstance(new_data[i], list):
+            fig.add_trace(go.Bar(x=list(range(len(new_data[i]))), y=new_data[i], marker_color='blue'))
+        
+        updated_figs.append(fig)
+    
     return updated_figs
 
-@app.callback(
+@callback(
     [Output(f'complexity-graph-{i}', 'figure') for i in range(5)],
     [Input('interval-component', 'n_intervals')]
 )
 def update_complexity_graphs(n):
     sizes = list(range(1, 101))
-    complexities = [size**2 for size in sizes]  
+    complexities = [size**2 for size in sizes] 
     updated_figs = []
     for i in range(5):
         complexity_figs[i].data = []
         complexity_figs[i].add_trace(go.Scatter(x=sizes, y=complexities, mode='lines', name='O(n^2)'))
         updated_figs.append(complexity_figs[i])
     return updated_figs
-
-if __name__ == '__main__':
-    app.run_server(debug=True)
